@@ -802,3 +802,379 @@ architecture, and defense-in-depth approach are credited to Knostic's work.
 This port extends the original with Zig-native implementation, expanded pattern
 coverage, entropy-based detection, data flow tracking, rate limiting, and a
 configurable policy engine.
+
+---
+
+## Appendix A — Preventive Layer for Exfiltration & Lateral Movement
+
+### A.1 Threat Model Addendum
+
+Layers L1–L6 are **reactive** — they scan content that has already been produced or
+requested. They do not prevent an agent from:
+
+| Threat | How it bypasses L1–L6 |
+|--------|----------------------|
+| **Data exfiltration** | Agent `fetch`es an attacker-controlled URL with secrets in body/query string |
+| **Lateral movement** | Agent connects to internal services (RFC1918 / localhost / link-local) |
+| **Cloud metadata theft** | Agent hits `169.254.169.254` (IMDS) to harvest IAM credentials |
+| **Subprocess abuse** | Agent spawns unrestricted shells (`bash -c ...`) or crypto-miners |
+| **Covert channels** | DNS exfil, large base64 payloads, slow-drip via multiple requests |
+
+**L7 adds a preventive boundary**: intercept side-effect APIs (network, subprocess)
+*before* they execute, consult the Zig decision engine, and allow/block/audit in
+real-time.
+
+### A.2 Policy Capsule
+
+Every L7 decision receives a **PolicyCapsule** — an immutable snapshot of the
+resolved policy for the current session:
+
+```
+PolicyCapsule {
+    profile:          string          // "home-lab" | "corp-dev" | "prod" | "research"
+    mode:             Mode            // enforce | audit
+    taint_state:      TaintState      // CLEAN | TAINTED | QUARANTINED
+    session_id:       string
+    network: {
+        allowed_hosts:    []HostSpec   // exact or wildcard
+        allowed_ports:    []u16
+        block_rfc1918:    bool
+        block_localhost:  bool
+        block_link_local: bool
+        block_metadata:   bool
+        max_egress_bytes_per_min: u64
+    }
+    process: {
+        allow_spawn:      bool          // global toggle
+        allowed_binaries: []string      // basename allowlist
+        deny_shells:      bool          // block bash/sh/zsh/fish/cmd/powershell
+        max_exec_per_min: u32
+    }
+    filesystem: {                       // v1.1+ enforcement
+        writable_roots:   []string
+        deny_dotfiles:    bool
+    }
+    taint: {
+        auto_escalate:         bool
+        quarantine_threshold:  u32      // block count before QUARANTINED
+        cool_down_seconds:     u64      // quiet window for de-escalation
+    }
+}
+```
+
+### A.3 L7: Side-Effect Enforcement
+
+L7 interposes on side-effect APIs at the TypeScript bridge layer, delegating
+decisions to the Zig core for speed and consistency.
+
+#### Interception Points (v1)
+
+| API | Interceptor | What it checks |
+|-----|-------------|----------------|
+| `globalThis.fetch` | `bridge/src/intercept/net.ts` | host, port, payload size |
+| `http.request` / `https.request` | `net.ts` | host, port, payload size |
+| `net.connect` / `tls.connect` | `net.ts` | host, port |
+| `child_process.spawn` / `.execFile` | `bridge/src/intercept/proc.ts` | binary name, argv |
+| `child_process.exec` | `proc.ts` | discouraged; block or audit |
+
+#### Interception Points (v1.1+, deferred)
+
+| API | Notes |
+|-----|-------|
+| `fs.writeFile` / `fs.mkdir` | FS boundary enforcement |
+| `dns.resolve` | DNS covert channel detection |
+| Content-based DLP on outbound payloads | Slow path — beyond existing scanner |
+
+### A.4 Exfiltration Controls
+
+1. **Host allowlist**: Only connections to explicitly allowed hosts are permitted.
+   - Exact match: `api.openai.com`
+   - Wildcard: `*.slack.com` (suffix match)
+   - Default: deny all unless profile overrides
+2. **RFC1918 / localhost / link-local / metadata blocking**:
+   - `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` → blocked
+   - `127.0.0.0/8`, `::1` → blocked
+   - `169.254.0.0/16`, `fe80::/10` → blocked
+   - `169.254.169.254` (AWS/GCP IMDS) → blocked
+   - `fd00:ec2::254` (AWS IMDSv2 IPv6) → blocked
+3. **Port allowlist**: Default `[80, 443]`; configurable per profile.
+4. **Egress byte cap**: Sliding window rate limit on outbound bytes per session.
+
+### A.5 Lateral Movement Controls
+
+1. **Subprocess deny-by-default**: `child_process.spawn` is blocked unless the
+   binary is in `allowed_binaries`.
+2. **Shell denial**: `bash`, `sh`, `zsh`, `fish`, `cmd`, `powershell` are denied
+   by default (prevents arbitrary command injection).
+3. **Exec rate limit**: Max spawns per minute per session.
+4. **FS boundary** (v1.1): Restrict writes to `writable_roots` only.
+
+### A.6 Taint & Quarantine Escalation
+
+Sessions progress through taint states:
+
+```
+CLEAN ──trigger──▶ TAINTED ──threshold──▶ QUARANTINED
+  ▲                   │                        │
+  └── cool_down ──────┘                        │
+                                               ▼
+                                    All side-effects blocked.
+                                    Operator must unquarantine.
+```
+
+**Triggers** (CLEAN → TAINTED):
+- Secret detected in output
+- High-entropy flag (high confidence)
+- Blocked operation (any L7 deny)
+- Untrusted content marker (from TS layer)
+
+**Escalation** (TAINTED → QUARANTINED):
+- Block count exceeds `quarantine_threshold`
+- Critical severity finding (e.g., cloud metadata access attempt)
+
+**De-escalation** (TAINTED → CLEAN):
+- No triggers for `cool_down_seconds` (TS passes timestamps to Zig)
+
+**QUARANTINED** sessions:
+- All L7 operations blocked (network, process, FS)
+- Requires operator `shield unquarantine <sessionId>` to resume
+
+### A.7 New Zig Modules
+
+```
+src/enforcement/
+  ip_ranges.zig      # RFC1918/localhost/link-local/metadata IP checks
+  domain.zig         # Host parsing + allowlist/wildcard matching
+  counters.zig       # Sliding window rate limiter (egress bytes + exec count)
+  taint_policy.zig   # Taint state machine (CLEAN/TAINTED/QUARANTINED)
+  net.zig            # decideNetConnect() — top-level network decision
+  proc.zig           # decideSpawn() — top-level subprocess decision
+  reason_codes.zig   # Stable numeric reason codes for audit
+```
+
+### A.8 Zig Decision API
+
+```zig
+pub const Decision = struct {
+    allow: bool,
+    reason_code: u32,
+    risk: enum { low, medium, high },
+    taint_update: ?TaintState,
+};
+
+pub fn decideNetConnect(capsule: PolicyCapsule, host: []const u8, port: u16, bytes_planned: u32) Decision
+pub fn decideSpawn(capsule: PolicyCapsule, argv_json: []const u8) Decision
+```
+
+Decisions are **deterministic** — given the same capsule + inputs, the result is
+always identical. No I/O, no randomness, no system calls.
+
+### A.9 TypeScript Bridge Interceptors
+
+```
+bridge/src/intercept/
+  net.ts       # Patches fetch, http.request, net.connect, tls.connect
+  proc.ts      # Patches child_process.spawn, execFile
+  freeze.ts    # Object.defineProperty freeze + tamper detection
+  state.ts     # Session taint state management
+```
+
+### A.10 Config Schema Additions
+
+```json
+{
+  "network": {
+    "allowedHosts": ["api.openai.com", "*.anthropic.com"],
+    "allowedPorts": [80, 443],
+    "blockRFC1918": true,
+    "blockLocalhost": true,
+    "blockLinkLocal": true,
+    "blockMetadata": true,
+    "maxEgressBytesPerMin": 10485760
+  },
+  "process": {
+    "allowSpawn": false,
+    "allowedBinaries": ["git", "node", "npx"],
+    "denyShells": true,
+    "maxExecPerMin": 10
+  },
+  "taint": {
+    "autoEscalate": true,
+    "quarantineThreshold": 5,
+    "coolDownSeconds": 300
+  },
+  "profile": "prod"
+}
+```
+
+### A.11 Testing Additions
+
+| Test category | Examples |
+|--------------|---------|
+| IP classification | RFC1918 ranges, edge cases (10.0.0.0, 10.255.255.255), IPv6 |
+| Domain matching | Exact, wildcard, normalization, trailing dot |
+| Counter enforcement | Byte accumulation, exec counting, window expiry |
+| Taint escalation | CLEAN→TAINTED→QUARANTINED, de-escalation timing |
+| Net decision | Allowed host, blocked IP, blocked port, rate limited |
+| Proc decision | Allowed binary, denied shell, rate limited |
+| Integration (TS) | Patched fetch blocked, spawn blocked, freeze tamper detected |
+
+---
+
+## Appendix B — Phase Updates (Minimal Disruption)
+
+The existing Phases 1–5 remain unchanged. Additions:
+
+### Phase 4 Additions (Infrastructure)
+
+Add to Phase 4's task list:
+
+- [ ] N-API exports for `decideNetConnect`, `decideSpawn`, `setSessionTaint`, `getSessionState`
+- [ ] WASM exports mirroring N-API
+- [ ] TypeScript interceptors: `net.ts`, `proc.ts`, `freeze.ts`, `state.ts`
+- [ ] Plugin profile resolution in `bridge/src/index.ts`
+
+### Phase 6: Preventive Layer Shipping (NEW)
+
+**Goal**: Ship L7 side-effect enforcement with network + process interception.
+
+- [ ] `src/enforcement/ip_ranges.zig` — IP classification helpers
+- [ ] `src/enforcement/domain.zig` — Allowlist matching with wildcard
+- [ ] `src/enforcement/counters.zig` — Egress byte + exec count rate limiting
+- [ ] `src/enforcement/taint_policy.zig` — Taint state machine
+- [ ] `src/enforcement/net.zig` — `decideNetConnect` decision function
+- [ ] `src/enforcement/proc.zig` — `decideSpawn` decision function
+- [ ] `src/enforcement/reason_codes.zig` — Stable audit reason codes
+- [ ] Operator commands: `shield status`, `quarantine`, `unquarantine`, `set-profile`
+- [ ] Audit log JSONL export with reason codes
+- [ ] Deployment profiles: `home-lab`, `corp-dev`, `prod`, `research`
+- [ ] Integration tests: IP blocks, domain matching, counters, taint escalation
+- [ ] Documentation: L7 architecture, configuration guide, profile reference
+
+---
+
+## Appendix C — Recommended Defaults, Deployment Profiles, and Break-Glass Ops
+
+### C.1 Recommended Default Policy
+
+```json
+{
+  "mode": "enforce",
+  "profile": "prod",
+  "layers": {
+    "promptGuard": true,
+    "outputScanner": true,
+    "toolBlocker": true,
+    "inputAudit": true,
+    "securityGate": true,
+    "rateLimiter": true,
+    "preventiveEnforcement": true
+  },
+  "network": {
+    "allowedHosts": [],
+    "allowedPorts": [80, 443],
+    "blockRFC1918": true,
+    "blockLocalhost": true,
+    "blockLinkLocal": true,
+    "blockMetadata": true,
+    "maxEgressBytesPerMin": 10485760
+  },
+  "process": {
+    "allowSpawn": false,
+    "allowedBinaries": [],
+    "denyShells": true,
+    "maxExecPerMin": 10
+  },
+  "taint": {
+    "autoEscalate": true,
+    "quarantineThreshold": 5,
+    "coolDownSeconds": 300
+  },
+  "redaction": {
+    "strategy": "mask"
+  },
+  "entropy": {
+    "enabled": true,
+    "base64Threshold": 4.5,
+    "hexThreshold": 3.5
+  },
+  "rateLimits": {
+    "execPerMinute": 10,
+    "sensitiveReadPerMinute": 5
+  }
+}
+```
+
+### C.2 Deployment Profiles
+
+| Setting | `home-lab` | `corp-dev` | `prod` | `research` |
+|---------|-----------|-----------|--------|-----------|
+| `mode` | audit | enforce | enforce | enforce |
+| `network.allowedHosts` | `["*"]` | `["*.internal.corp"]` | `[]` (deny all) | `["*"]` |
+| `network.allowedPorts` | `[80,443,8080,3000]` | `[80,443]` | `[443]` | `[80,443]` |
+| `network.blockRFC1918` | false | true | true | true |
+| `network.blockLocalhost` | false | false | true | true |
+| `network.blockMetadata` | true | true | true | true |
+| `process.allowSpawn` | true | true | false | true |
+| `process.denyShells` | false | true | true | true |
+| `process.allowedBinaries` | `["*"]` | `["git","node","npx","python"]` | `[]` | `["git","node","npx","python","pip"]` |
+| `taint.autoEscalate` | false | true | true | true |
+| `taint.quarantineThreshold` | 999 | 10 | 5 | 10 |
+
+### C.3 Break-Glass Workflow
+
+```
+1. Normal operation (enforce mode)
+   └── Agent hits a block → logged, actionable error returned
+
+2. Operator suspects issue
+   └── shield status → shows taint state, recent blocks, profile
+
+3. Escalation
+   └── shield quarantine <sessionId> → all side-effects blocked
+
+4. Investigation
+   └── shield export-audit --since 1h → JSONL dump for review
+
+5. Resolution
+   └── shield unquarantine <sessionId> --reason "reviewed, false positive"
+   └── shield set-profile <name> → switch profile if needed
+
+6. Emergency override
+   └── shield set-profile home-lab → maximum permissiveness (audit mode)
+```
+
+### C.4 Required Operator Commands
+
+| Command | Description |
+|---------|-------------|
+| `shield status` | Print current profile, taint state, recent blocks (last 10) |
+| `shield quarantine <sessionId>` | Force session to QUARANTINED state |
+| `shield unquarantine <sessionId> --reason "..."` | Restore session to CLEAN with audit trail |
+| `shield set-profile <name>` | Switch deployment profile |
+| `shield export-audit --since <duration>` | Export audit log as JSONL |
+
+### C.5 UX Recommendations
+
+1. **Actionable error messages**: Every block includes a reason code and a
+   human-readable explanation. Example:
+   ```
+   [OC-SHIELD L7] Connection blocked: 10.0.0.5:8080
+   Reason: NET_RFC1918_BLOCKED (code 1001)
+   Action: Add host to network.allowedHosts or switch to home-lab profile
+   ```
+
+2. **Stable reason codes**: Numeric codes never change meaning across versions.
+   Operators can build alerting/dashboards on these codes.
+
+3. **Log hygiene**: Audit entries never contain the actual secret/PII — only
+   pattern names, reason codes, and metadata.
+
+### C.6 Engineering Recommendations
+
+1. **Priority interceptors**: Ship `net.ts` and `proc.ts` first. FS and DNS
+   interception can wait for v1.1.
+2. **Tamper detection**: `freeze.ts` should detect if a skill un-patches the
+   interceptors. On tamper → quarantine session.
+3. **Zig purity**: Zig modules must never perform I/O. All I/O (logging, config
+   loading, timer queries) happens in the TypeScript layer.
