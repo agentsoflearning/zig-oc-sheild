@@ -87,6 +87,11 @@ pub fn detectHighEntropy(
         }
 
         const token_len = pos - token_start;
+        if (token_len == 0) {
+            // Character didn't match any charset (e.g., ':', '(', etc.)
+            pos += 1;
+            continue;
+        }
         if (token_len < config.min_length or token_len > config.max_length) continue;
 
         const token = input[token_start..pos];
