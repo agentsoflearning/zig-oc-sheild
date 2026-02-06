@@ -1,0 +1,32 @@
+{
+  "profile": "home-lab",
+  "mode": "audit",
+  "network": {
+    "allowedHosts": ["*"],
+    "allowedPorts": [80, 443, 8080, 3000],
+    "blockRFC1918": false,
+    "blockLocalhost": false,
+    "blockLinkLocal": false,
+    "blockMetadata": true,
+    "maxEgressBytesPerMin": 104857600
+  },
+  "process": {
+    "allowSpawn": true,
+    "allowedBinaries": ["*"],
+    "denyShells": false,
+    "maxExecPerMin": 100
+  },
+  "taint": {
+    "autoEscalate": false,
+    "quarantineThreshold": 999,
+    "coolDownSeconds": 60
+  },
+  "redaction": {
+    "strategy": "mask"
+  },
+  "entropy": {
+    "enabled": true,
+    "base64Threshold": 4.5,
+    "hexThreshold": 3.5
+  }
+}

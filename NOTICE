@@ -1,0 +1,32 @@
+OpenClaw Shield (Zig)
+Copyright 2026 Contributors
+
+This project is a derivative work based on openclaw-shield
+by Knostic (https://knostic.ai/).
+
+Original work:
+  Repository: https://github.com/knostic/openclaw-shield
+  Copyright:  2025 Knostic (https://knostic.ai/)
+  License:    Apache License 2.0
+
+The following components are derived from the original work:
+  - 5-layer defense-in-depth architecture (L1-L5)
+  - Secret detection patterns (15 patterns)
+  - PII detection patterns (6 patterns)
+  - Destructive command patterns
+  - Sensitive file path patterns (18 patterns)
+  - Plugin integration approach with OpenClaw hooks
+
+Modifications and additions in this derivative work:
+  - Complete rewrite from TypeScript to Zig
+  - Custom pattern matching engine (no regex dependency)
+  - Shannon entropy-based secret detection
+  - International PII pattern support (UK, EU, CA, AU)
+  - Skill trust analysis / static code scanning
+  - Data flow taint tracking
+  - Rate limiting for sensitive operations
+  - Configurable policy engine
+  - Structured audit logging
+  - Multiple redaction strategies
+  - Node N-API and WASM bridge targets
+  - CLI binary for standalone use
