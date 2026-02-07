@@ -14,6 +14,16 @@ import { NativeBinding, buildPolicyFlags } from '../native';
 import { ShieldConfig, Decision, ReasonCode, REASON_LABELS, TaintState } from '../types';
 import { StateManager } from './state';
 
+// Get mutable CJS module objects for monkey-patching.
+// When loaded via jiti, ESM namespace imports have configurable:false
+// properties that prevent reassignment. require() returns the actual
+// mutable CJS module object that works in both tsc and jiti contexts.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const httpMod: typeof http = require('http');
+const httpsMod: typeof https = require('https');
+const netMod: typeof net = require('net');
+const tlsMod: typeof tls = require('tls');
+
 /** Error thrown when a network connection is blocked */
 export class ShieldNetworkError extends Error {
   public readonly reasonCode: number;
@@ -37,10 +47,10 @@ export class ShieldNetworkError extends Error {
 // Original references saved before patching
 const originals = {
   fetch: globalThis.fetch,
-  httpRequest: http.request,
-  httpsRequest: https.request,
-  netConnect: net.connect,
-  tlsConnect: tls.connect,
+  httpRequest: httpMod.request,
+  httpsRequest: httpsMod.request,
+  netConnect: netMod.connect,
+  tlsConnect: tlsMod.connect,
 };
 
 /** Check if connection should be allowed */
@@ -197,8 +207,7 @@ export function installNetInterceptors(
   }
 
   // ── Patch http.request ────────────────────────────────────────────
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (http as any).request = function shieldHttpRequest(...args: unknown[]): http.ClientRequest {
+  httpMod.request = function shieldHttpRequest(...args: unknown[]): http.ClientRequest {
     const hostPort = extractHostPort(args);
     if (hostPort) {
       const decision = checkConnection(binding, config, state, sessionId, hostPort.host, hostPort.port);
@@ -215,8 +224,7 @@ export function installNetInterceptors(
   };
 
   // ── Patch https.request ───────────────────────────────────────────
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (https as any).request = function shieldHttpsRequest(...args: unknown[]): http.ClientRequest {
+  httpsMod.request = function shieldHttpsRequest(...args: unknown[]): http.ClientRequest {
     const hostPort = extractHostPort(args);
     if (hostPort) {
       const decision = checkConnection(binding, config, state, sessionId, hostPort.host, hostPort.port);
@@ -233,8 +241,7 @@ export function installNetInterceptors(
   };
 
   // ── Patch net.connect ─────────────────────────────────────────────
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (net as any).connect = function shieldNetConnect(...args: unknown[]): net.Socket {
+  netMod.connect = function shieldNetConnect(...args: unknown[]): net.Socket {
     const opts = args[0];
     let host = 'localhost';
     let port = 0;
@@ -260,8 +267,7 @@ export function installNetInterceptors(
   };
 
   // ── Patch tls.connect ─────────────────────────────────────────────
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (tls as any).connect = function shieldTlsConnect(...args: unknown[]): tls.TLSSocket {
+  tlsMod.connect = function shieldTlsConnect(...args: unknown[]): tls.TLSSocket {
     const opts = args[0];
     let host = 'localhost';
     let port = 443;
@@ -285,14 +291,10 @@ export function installNetInterceptors(
 /** Restore original network functions (for testing/cleanup) */
 export function uninstallNetInterceptors(): void {
   if (originals.fetch) (globalThis as Record<string, unknown>).fetch = originals.fetch;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (http as any).request = originals.httpRequest;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (https as any).request = originals.httpsRequest;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (net as any).connect = originals.netConnect;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (tls as any).connect = originals.tlsConnect;
+  httpMod.request = originals.httpRequest;
+  httpsMod.request = originals.httpsRequest;
+  netMod.connect = originals.netConnect;
+  tlsMod.connect = originals.tlsConnect;
 }
 
 /** Get original references (for tamper detection) */

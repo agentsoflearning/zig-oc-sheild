@@ -9,6 +9,12 @@ import { NativeBinding } from '../native';
 import { ShieldConfig, Decision, ReasonCode, REASON_LABELS, TaintState } from '../types';
 import { StateManager } from './state';
 
+// Get mutable CJS module object for monkey-patching.
+// When loaded via jiti, ESM namespace imports have configurable:false
+// properties that prevent reassignment.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const cpMod: typeof child_process = require('child_process');
+
 /** Error thrown when a subprocess spawn is blocked */
 export class ShieldProcessError extends Error {
   public readonly reasonCode: number;
@@ -29,9 +35,9 @@ export class ShieldProcessError extends Error {
 
 // Original references saved before patching
 const originals = {
-  spawn: child_process.spawn,
-  execFile: child_process.execFile,
-  exec: child_process.exec,
+  spawn: cpMod.spawn,
+  execFile: cpMod.execFile,
+  exec: cpMod.exec,
 };
 
 /** Extract basename from a binary path */
@@ -103,7 +109,7 @@ export function installProcInterceptors(
   sessionId: string,
 ): void {
   // ── Patch spawn ────────────────────────────────────────────────────
-  (child_process as { spawn: typeof child_process.spawn }).spawn = function shieldSpawn(
+  cpMod.spawn = function shieldSpawn(
     command: string,
     ...rest: unknown[]
   ): child_process.ChildProcess {
@@ -121,7 +127,7 @@ export function installProcInterceptors(
   } as typeof child_process.spawn;
 
   // ── Patch execFile ─────────────────────────────────────────────────
-  (child_process as { execFile: typeof child_process.execFile }).execFile = function shieldExecFile(
+  cpMod.execFile = function shieldExecFile(
     file: string,
     ...rest: unknown[]
   ): child_process.ChildProcess {
@@ -139,7 +145,7 @@ export function installProcInterceptors(
   } as typeof child_process.execFile;
 
   // ── Patch exec (discouraged, audit by default) ─────────────────────
-  (child_process as { exec: typeof child_process.exec }).exec = function shieldExec(
+  cpMod.exec = function shieldExec(
     command: string,
     ...rest: unknown[]
   ): child_process.ChildProcess {
@@ -162,9 +168,9 @@ export function installProcInterceptors(
 
 /** Restore original process functions (for testing/cleanup) */
 export function uninstallProcInterceptors(): void {
-  (child_process as { spawn: typeof child_process.spawn }).spawn = originals.spawn;
-  (child_process as { execFile: typeof child_process.execFile }).execFile = originals.execFile;
-  (child_process as { exec: typeof child_process.exec }).exec = originals.exec;
+  cpMod.spawn = originals.spawn;
+  cpMod.execFile = originals.execFile;
+  cpMod.exec = originals.exec;
 }
 
 /** Get original references (for tamper detection) */

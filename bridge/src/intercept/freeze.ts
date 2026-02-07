@@ -13,6 +13,16 @@ import * as child_process from 'child_process';
 import { StateManager } from './state';
 import { ReasonCode } from '../types';
 
+// Get mutable CJS module objects for freeze/unfreeze operations.
+// When loaded via jiti, ESM namespace imports have configurable:false
+// properties that prevent Object.defineProperty calls.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const httpMod: typeof http = require('http');
+const httpsMod: typeof https = require('https');
+const netMod: typeof net = require('net');
+const tlsMod: typeof tls = require('tls');
+const cpMod: typeof child_process = require('child_process');
+
 /** References to the patched (shield) functions */
 interface PatchedRefs {
   fetch?: typeof globalThis.fetch;
@@ -33,26 +43,26 @@ let tamperTimer: ReturnType<typeof setInterval> | null = null;
  * Call this AFTER installing interceptors.
  */
 export function freezeInterceptors(): void {
-  // Capture current (patched) references
+  // Capture current (patched) references from mutable CJS modules
   frozenRefs = {
     fetch: globalThis.fetch,
-    httpRequest: http.request,
-    httpsRequest: https.request,
-    netConnect: net.connect,
-    tlsConnect: tls.connect,
-    spawn: child_process.spawn,
-    execFile: child_process.execFile,
-    exec: child_process.exec,
+    httpRequest: httpMod.request,
+    httpsRequest: httpsMod.request,
+    netConnect: netMod.connect,
+    tlsConnect: tlsMod.connect,
+    spawn: cpMod.spawn,
+    execFile: cpMod.execFile,
+    exec: cpMod.exec,
   };
 
   // Best-effort freeze: make properties non-writable
-  tryFreeze(http, 'request', frozenRefs.httpRequest);
-  tryFreeze(https, 'request', frozenRefs.httpsRequest);
-  tryFreeze(net, 'connect', frozenRefs.netConnect);
-  tryFreeze(tls, 'connect', frozenRefs.tlsConnect);
-  tryFreeze(child_process, 'spawn', frozenRefs.spawn);
-  tryFreeze(child_process, 'execFile', frozenRefs.execFile);
-  tryFreeze(child_process, 'exec', frozenRefs.exec);
+  tryFreeze(httpMod, 'request', frozenRefs.httpRequest);
+  tryFreeze(httpsMod, 'request', frozenRefs.httpsRequest);
+  tryFreeze(netMod, 'connect', frozenRefs.netConnect);
+  tryFreeze(tlsMod, 'connect', frozenRefs.tlsConnect);
+  tryFreeze(cpMod, 'spawn', frozenRefs.spawn);
+  tryFreeze(cpMod, 'execFile', frozenRefs.execFile);
+  tryFreeze(cpMod, 'exec', frozenRefs.exec);
 }
 
 function tryFreeze(obj: object, prop: string, value: unknown): void {
@@ -60,11 +70,22 @@ function tryFreeze(obj: object, prop: string, value: unknown): void {
     Object.defineProperty(obj, prop, {
       value,
       writable: false,
-      configurable: false,
+      configurable: true, // Must stay configurable so we can unfreeze during shutdown
     });
   } catch {
     // Some environments don't allow freezing built-in modules
     // That's OK — tamper detection will still catch changes
+  }
+}
+
+function tryUnfreeze(obj: object, prop: string): void {
+  try {
+    Object.defineProperty(obj, prop, {
+      writable: true,
+      configurable: true,
+    });
+  } catch {
+    // Best effort — may already be writable
   }
 }
 
@@ -80,25 +101,25 @@ export function detectTamper(): string[] {
   if (frozenRefs.fetch && globalThis.fetch !== frozenRefs.fetch) {
     tampered.push('fetch');
   }
-  if (http.request !== frozenRefs.httpRequest) {
+  if (httpMod.request !== frozenRefs.httpRequest) {
     tampered.push('http.request');
   }
-  if (https.request !== frozenRefs.httpsRequest) {
+  if (httpsMod.request !== frozenRefs.httpsRequest) {
     tampered.push('https.request');
   }
-  if (net.connect !== frozenRefs.netConnect) {
+  if (netMod.connect !== frozenRefs.netConnect) {
     tampered.push('net.connect');
   }
-  if (tls.connect !== frozenRefs.tlsConnect) {
+  if (tlsMod.connect !== frozenRefs.tlsConnect) {
     tampered.push('tls.connect');
   }
-  if (child_process.spawn !== frozenRefs.spawn) {
+  if (cpMod.spawn !== frozenRefs.spawn) {
     tampered.push('child_process.spawn');
   }
-  if (child_process.execFile !== frozenRefs.execFile) {
+  if (cpMod.execFile !== frozenRefs.execFile) {
     tampered.push('child_process.execFile');
   }
-  if (child_process.exec !== frozenRefs.exec) {
+  if (cpMod.exec !== frozenRefs.exec) {
     tampered.push('child_process.exec');
   }
 
@@ -163,8 +184,17 @@ export function stopTamperDetection(): void {
   }
 }
 
-/** Reset freeze state (for testing) */
+/** Reset freeze state — unfreeze all properties so they can be re-assigned */
 export function resetFreeze(): void {
   stopTamperDetection();
+  if (frozenRefs) {
+    tryUnfreeze(httpMod, 'request');
+    tryUnfreeze(httpsMod, 'request');
+    tryUnfreeze(netMod, 'connect');
+    tryUnfreeze(tlsMod, 'connect');
+    tryUnfreeze(cpMod, 'spawn');
+    tryUnfreeze(cpMod, 'execFile');
+    tryUnfreeze(cpMod, 'exec');
+  }
   frozenRefs = null;
 }
