@@ -56,11 +56,11 @@ All pattern matching is O(n) with custom prefix/charset matchers — no regex.
 
 ```bash
 # Download the gateway package
-curl -LO https://github.com/agentsoflearning/zig-oc-sheild/releases/latest/download/ocshield-gateway-v0.0.1.tar.gz
+curl -LO https://github.com/agentsoflearning/zig-oc-sheild/releases/latest/download/ocshield-gateway-v0.0.2.tar.gz
 
 # Extract into your OpenClaw plugins directory
 cd ~/.openclaw/plugins
-tar xzf /path/to/ocshield-gateway-v0.0.1.tar.gz
+tar xzf /path/to/ocshield-gateway-v0.0.2.tar.gz
 ```
 
 Add to your OpenClaw config:

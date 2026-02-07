@@ -16,15 +16,15 @@ Two deployment paths: **download a release** (recommended) or **build from sourc
 **1. Download the gateway package from GitHub Releases:**
 
 ```bash
-# Replace v0.0.1 with the desired version
-curl -LO https://github.com/agentsoflearning/zig-oc-sheild/releases/download/v0.0.1/ocshield-gateway-v0.0.1.tar.gz
+# Replace v0.0.2 with the desired version
+curl -LO https://github.com/agentsoflearning/zig-oc-sheild/releases/download/v0.0.2/ocshield-gateway-v0.0.2.tar.gz
 ```
 
 **2. Extract into your OpenClaw plugins directory:**
 
 ```bash
 cd ~/.openclaw/plugins    # or your gateway's plugin directory
-tar xzf /path/to/ocshield-gateway-v0.0.1.tar.gz
+tar xzf /path/to/ocshield-gateway-v0.0.2.tar.gz
 ```
 
 This creates a ready-to-load directory:
@@ -104,7 +104,7 @@ Expected response:
   "profile": "corp-dev",
   "mode": "enforce",
   "binding": "pure-ts",
-  "version": "0.0.1"
+  "version": "0.0.2"
 }
 ```
 

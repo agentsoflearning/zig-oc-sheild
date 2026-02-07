@@ -134,7 +134,7 @@ const all_patterns_array = secrets.patterns ++ pii.patterns ++ destructive.patte
 
 // ── Version ────────────────────────────────────────────────────────────
 
-pub const version = "0.0.1";
+pub const version = "0.0.2";
 pub const name = "OpenClaw Shield (Zig)";
 
 // ── Tests ──────────────────────────────────────────────────────────────
