@@ -46,6 +46,14 @@ pub const taint_policy = @import("enforcement/taint_policy.zig");
 pub const net_enforce = @import("enforcement/net.zig");
 pub const proc_enforce = @import("enforcement/proc.zig");
 
+// ── Policy Modules (Phase 5) ─────────────────────────────────────────
+
+pub const policy_types = @import("policy/types.zig");
+pub const policy_validator = @import("policy/validator.zig");
+pub const policy_loader = @import("policy/loader.zig");
+pub const policy_engine = @import("policy/engine.zig");
+pub const policy_hardening = @import("policy/hardening.zig");
+
 // ── Re-exported Types ──────────────────────────────────────────────────
 
 pub const Pattern = pattern.Pattern;
@@ -90,6 +98,15 @@ pub const decideSpawn = proc_enforce.decideSpawn;
 pub const TaintManager = taint_policy.TaintManager;
 pub const CounterManager = counters.CounterManager;
 
+// Policy re-exports
+pub const PolicyCapsule = policy_types.PolicyCapsule;
+pub const PolicyVersion = policy_types.PolicyVersion;
+pub const PatternOverrides = policy_types.PatternOverrides;
+pub const PolicyEngine = policy_engine.PolicyEngine;
+pub const loadPolicyFromJson = policy_loader.loadFromJson;
+pub const validatePolicy = policy_validator.validate;
+pub const isValidPolicy = policy_validator.isValid;
+
 // ── Convenience: All Text Patterns ─────────────────────────────────────
 
 /// All text-scanning patterns combined (secrets + PII + destructive commands).
@@ -117,7 +134,7 @@ const all_patterns_array = secrets.patterns ++ pii.patterns ++ destructive.patte
 
 // ── Version ────────────────────────────────────────────────────────────
 
-pub const version = "0.3.0";
+pub const version = "0.5.0";
 pub const name = "OpenClaw Shield (Zig)";
 
 // ── Tests ──────────────────────────────────────────────────────────────
@@ -152,6 +169,12 @@ test {
     _ = taint_policy;
     _ = net_enforce;
     _ = proc_enforce;
+    // Phase 5: Policy Engine
+    _ = policy_types;
+    _ = policy_validator;
+    _ = policy_loader;
+    _ = policy_engine;
+    _ = policy_hardening;
 }
 
 // ── Integration Tests ──────────────────────────────────────────────────

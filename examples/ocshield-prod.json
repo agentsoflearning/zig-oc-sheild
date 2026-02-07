@@ -1,0 +1,32 @@
+{
+  "profile": "prod",
+  "mode": "enforce",
+  "network": {
+    "allowedHosts": [],
+    "allowedPorts": [443],
+    "blockRFC1918": true,
+    "blockLocalhost": true,
+    "blockLinkLocal": true,
+    "blockMetadata": true,
+    "maxEgressBytesPerMin": 10485760
+  },
+  "process": {
+    "allowSpawn": false,
+    "allowedBinaries": [],
+    "denyShells": true,
+    "maxExecPerMin": 10
+  },
+  "taint": {
+    "autoEscalate": true,
+    "quarantineThreshold": 5,
+    "coolDownSeconds": 300
+  },
+  "redaction": {
+    "strategy": "mask"
+  },
+  "entropy": {
+    "enabled": true,
+    "base64Threshold": 4.5,
+    "hexThreshold": 3.5
+  }
+}

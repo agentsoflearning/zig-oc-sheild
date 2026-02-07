@@ -1,3 +1,19 @@
+# Zig
 .zig-cache/
 zig-out/
 *.o
+
+# TypeScript bridge
+bridge/dist/
+bridge/node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+*.swp
+*.swo
+*~
+.vscode/
+.idea/

@@ -41,6 +41,23 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run the CLI");
     run_step.dependOn(&run_cmd.step);
 
+    // ── WASM module (fallback for environments without N-API) ──────
+    const wasm_target = b.resolveTargetQuery(.{
+        .cpu_arch = .wasm32,
+        .os_tag = .freestanding,
+    });
+    const wasm = b.addExecutable(.{
+        .name = "ocshield",
+        .root_source_file = b.path("src/wasm_entry.zig"),
+        .target = wasm_target,
+        .optimize = .ReleaseFast,
+    });
+    wasm.entry = .disabled;
+    wasm.rdynamic = true;
+    const wasm_install = b.addInstallArtifact(wasm, .{});
+    const wasm_step = b.step("wasm", "Build WASM module");
+    wasm_step.dependOn(&wasm_install.step);
+
     // ── Tests ───────────────────────────────────────────────────────
     const lib_tests = b.addTest(.{
         .root_source_file = b.path("src/lib.zig"),
