@@ -1,0 +1,32 @@
+{
+  "profile": "corp-dev",
+  "mode": "enforce",
+  "network": {
+    "allowedHosts": [],
+    "allowedPorts": [80, 443],
+    "blockRFC1918": true,
+    "blockLocalhost": true,
+    "blockLinkLocal": true,
+    "blockMetadata": true,
+    "maxEgressBytesPerMin": 52428800
+  },
+  "process": {
+    "allowSpawn": true,
+    "allowedBinaries": ["git", "node", "npx", "python"],
+    "denyShells": true,
+    "maxExecPerMin": 30
+  },
+  "taint": {
+    "autoEscalate": true,
+    "quarantineThreshold": 10,
+    "coolDownSeconds": 300
+  },
+  "redaction": {
+    "strategy": "mask"
+  },
+  "entropy": {
+    "enabled": true,
+    "base64Threshold": 4.5,
+    "hexThreshold": 3.5
+  }
+}
