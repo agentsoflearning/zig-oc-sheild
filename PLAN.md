@@ -538,7 +538,7 @@ import { loadNative, loadWasm, type ShieldCore } from "./native.js";
 export default {
   id: "zig-oc-shield",
   name: "OpenClaw Shield (Zig)",
-  version: "0.2.0",
+  version: "0.0.1",
   description: "Zig-native security shield — blocks destructive commands, redacts secrets/PII",
 
   async register(api: OpenClawPluginApi) {
@@ -620,7 +620,7 @@ export async function loadWasm(): Promise<ShieldCore> {
   "id": "zig-oc-shield",
   "name": "OpenClaw Shield (Zig)",
   "description": "Zig-native security shield — blocks destructive commands, redacts secrets and PII",
-  "version": "0.2.0",
+  "version": "0.0.1",
   "configSchema": {
     "type": "object",
     "properties": {
@@ -814,7 +814,7 @@ test "redact replaces with mask tag" {
 - [ ] npm publish preparation
 - [ ] OpenClaw plugin registry submission
 
-**Current stats**: 362 Zig tests + 44 jiti tests, v0.5.0, 36+ pattern matchers, 7 defense layers
+**Current stats**: 362 Zig tests + 44 jiti tests, v0.0.1, 36+ pattern matchers, 7 defense layers
 
 ---
 
