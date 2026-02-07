@@ -32,6 +32,11 @@ export enum ReasonCode {
   RATE_LIMIT_EXCEEDED = 1201,
   TAINT_ESCALATED = 1301,
   QUARANTINED = 1302,
+  FS_SENSITIVE_PATH = 1401,
+  FS_WRITE_BLOCKED = 1402,
+  FS_PATH_TRAVERSAL = 1403,
+  DNS_BLOCKED_DOMAIN = 1501,
+  DNS_REBIND_DETECTED = 1502,
 }
 
 /** Labels for reason codes — used in error messages */
@@ -50,6 +55,11 @@ export const REASON_LABELS: Record<number, string> = {
   [ReasonCode.RATE_LIMIT_EXCEEDED]: 'RATE_LIMIT_EXCEEDED',
   [ReasonCode.TAINT_ESCALATED]: 'TAINT_ESCALATED',
   [ReasonCode.QUARANTINED]: 'QUARANTINED',
+  [ReasonCode.FS_SENSITIVE_PATH]: 'FS_SENSITIVE_PATH',
+  [ReasonCode.FS_WRITE_BLOCKED]: 'FS_WRITE_BLOCKED',
+  [ReasonCode.FS_PATH_TRAVERSAL]: 'FS_PATH_TRAVERSAL',
+  [ReasonCode.DNS_BLOCKED_DOMAIN]: 'DNS_BLOCKED_DOMAIN',
+  [ReasonCode.DNS_REBIND_DETECTED]: 'DNS_REBIND_DETECTED',
 };
 
 /** Decision result from the Zig engine */
@@ -94,6 +104,17 @@ export interface ShieldConfig {
     enabled: boolean;
     base64Threshold: number;
     hexThreshold: number;
+  };
+  filesystem: {
+    blockSensitivePaths: boolean;
+    blockWrites: boolean;
+    allowedWritePaths: string[];
+    blockPathTraversal: boolean;
+  };
+  dns: {
+    blockPrivateResolution: boolean;
+    allowedDomains: string[];
+    blockAllDns: boolean;
   };
   layers?: {
     preventiveEnforcement?: boolean;
