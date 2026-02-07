@@ -793,15 +793,28 @@ test "redact replaces with mask tag" {
 - [x] Clean up .gitignore, package.json
 - [x] Squash commit history for clean initial state
 
+### jiti Integration Testing ✅
+**Goal**: Validate plugin loads correctly through OpenClaw's jiti-based plugin loader
+
+- [x] 44-test integration suite (`bridge/test/jiti-integration.mjs`)
+- [x] Module loading and export verification (9 tests)
+- [x] Config resolution across all 4 profiles (5 tests)
+- [x] Policy validation with errors/warnings (5 tests)
+- [x] Native binding pure-TS fallback (9 tests)
+- [x] State manager taint tracking and audit export (4 tests)
+- [x] OpenClaw register() simulation with mock API (8 tests)
+- [x] Lifecycle init/shutdown idempotency (3 tests)
+- [x] Policy flags encoding (1 test)
+- [x] ESM compatibility fix: `require()` for mutable CJS module refs in interceptors
+
 ### Phase 7: OpenClaw Plugin Registration & Publishing (future)
 **Goal**: End-to-end OpenClaw integration
 
-- [ ] End-to-end test of plugin loading via `jiti`
 - [ ] Hook wiring into OpenClaw lifecycle
 - [ ] npm publish preparation
 - [ ] OpenClaw plugin registry submission
 
-**Current stats**: 362 tests, 0.5.0, 36+ pattern matchers, 7 defense layers
+**Current stats**: 362 Zig tests + 44 jiti tests, v0.5.0, 36+ pattern matchers, 7 defense layers
 
 ---
 
