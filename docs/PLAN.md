@@ -487,7 +487,7 @@ See `docs/DEPLOYMENT.md` for the full configuration reference.
 - [ ] npm publish `@ocshield/bridge`
 - [ ] OpenClaw plugin registry submission
 
-**Current stats**: 362 Zig tests + 44 jiti tests, v0.0.1, 36+ pattern matchers, 7 defense layers, 31 interceptor hooks
+**Current stats**: 362 Zig tests + 44 jiti tests, v0.0.2, 36+ pattern matchers, 7 defense layers, 31 interceptor hooks
 
 ---
 

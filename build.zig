@@ -11,7 +11,9 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    b.installArtifact(lib);
+    const lib_install = b.addInstallArtifact(lib, .{});
+    const lib_step = b.step("lib", "Build static library");
+    lib_step.dependOn(&lib_install.step);
 
     // ── Shared library (for N-API / dynamic loading) ────────────────
     const shared = b.addSharedLibrary(.{
