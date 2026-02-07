@@ -2,8 +2,13 @@
   "profile": "research",
   "mode": "enforce",
   "network": {
-    "allowedHosts": ["*"],
-    "allowedPorts": [80, 443],
+    "allowedHosts": [
+      "*"
+    ],
+    "allowedPorts": [
+      80,
+      443
+    ],
     "blockRFC1918": true,
     "blockLocalhost": true,
     "blockLinkLocal": true,
@@ -12,7 +17,13 @@
   },
   "process": {
     "allowSpawn": true,
-    "allowedBinaries": ["git", "node", "npx", "python", "pip"],
+    "allowedBinaries": [
+      "git",
+      "node",
+      "npx",
+      "python",
+      "pip"
+    ],
     "denyShells": true,
     "maxExecPerMin": 30
   },
@@ -28,5 +39,20 @@
     "enabled": true,
     "base64Threshold": 4.5,
     "hexThreshold": 3.5
+  },
+  "filesystem": {
+    "blockSensitivePaths": true,
+    "blockWrites": true,
+    "allowedWritePaths": [
+      "/tmp/*"
+    ],
+    "blockPathTraversal": true
+  },
+  "dns": {
+    "blockPrivateResolution": true,
+    "allowedDomains": [
+      "*"
+    ],
+    "blockAllDns": false
   }
 }

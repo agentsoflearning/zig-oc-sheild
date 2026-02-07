@@ -16,6 +16,17 @@
     "denyShells": true,
     "maxExecPerMin": 30
   },
+  "filesystem": {
+    "blockSensitivePaths": true,
+    "blockWrites": true,
+    "allowedWritePaths": ["/tmp/*", "/var/tmp/*"],
+    "blockPathTraversal": true
+  },
+  "dns": {
+    "blockPrivateResolution": true,
+    "allowedDomains": ["*.internal.corp"],
+    "blockAllDns": false
+  },
   "taint": {
     "autoEscalate": true,
     "quarantineThreshold": 10,
