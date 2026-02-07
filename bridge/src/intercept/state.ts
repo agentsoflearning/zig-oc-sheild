@@ -24,6 +24,9 @@ export class StateManager {
   private quarantineThreshold: number;
   private coolDownSeconds: number;
   private maxRecentBlocks = 10;
+  // An unbounded audit log is just a memory leak with a PhD in security.
+  // Cap it before someone discovers they can OOM a security tool by being naughty.
+  private maxAuditEntries = 10000;
 
   constructor(opts: {
     windowSeconds?: number;
@@ -117,6 +120,11 @@ export class StateManager {
     }
 
     this.auditLog.push(entry);
+    // Evict oldest entries when we hit the cap. Congratulations, attacker:
+    // you triggered 10,000 blocks and all you got was this lousy log rotation.
+    if (this.auditLog.length > this.maxAuditEntries) {
+      this.auditLog = this.auditLog.slice(-Math.floor(this.maxAuditEntries * 0.75));
+    }
   }
 
   /** Add egress bytes for rate limiting. Returns current total in window. */

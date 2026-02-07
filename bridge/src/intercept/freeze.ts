@@ -28,11 +28,17 @@ interface PatchedRefs {
   fetch?: typeof globalThis.fetch;
   httpRequest: typeof http.request;
   httpsRequest: typeof https.request;
+  httpGet: typeof http.get;
+  httpsGet: typeof https.get;
   netConnect: typeof net.connect;
   tlsConnect: typeof tls.connect;
   spawn: typeof child_process.spawn;
+  spawnSync: typeof child_process.spawnSync;
   execFile: typeof child_process.execFile;
+  execFileSync: typeof child_process.execFileSync;
   exec: typeof child_process.exec;
+  execSync: typeof child_process.execSync;
+  fork: typeof child_process.fork;
 }
 
 let frozenRefs: PatchedRefs | null = null;
@@ -41,6 +47,10 @@ let tamperTimer: ReturnType<typeof setInterval> | null = null;
 /**
  * Capture current references and freeze them using Object.defineProperty.
  * Call this AFTER installing interceptors.
+ *
+ * Every patched function gets frozen. If a skill swaps one out, we notice
+ * on the next tamper check and quarantine the session faster than you can
+ * say "I thought nobody would notice."
  */
 export function freezeInterceptors(): void {
   // Capture current (patched) references from mutable CJS modules
@@ -48,21 +58,33 @@ export function freezeInterceptors(): void {
     fetch: globalThis.fetch,
     httpRequest: httpMod.request,
     httpsRequest: httpsMod.request,
+    httpGet: httpMod.get,
+    httpsGet: httpsMod.get,
     netConnect: netMod.connect,
     tlsConnect: tlsMod.connect,
     spawn: cpMod.spawn,
+    spawnSync: cpMod.spawnSync,
     execFile: cpMod.execFile,
+    execFileSync: cpMod.execFileSync,
     exec: cpMod.exec,
+    execSync: cpMod.execSync,
+    fork: cpMod.fork,
   };
 
   // Best-effort freeze: make properties non-writable
   tryFreeze(httpMod, 'request', frozenRefs.httpRequest);
   tryFreeze(httpsMod, 'request', frozenRefs.httpsRequest);
+  tryFreeze(httpMod, 'get', frozenRefs.httpGet);
+  tryFreeze(httpsMod, 'get', frozenRefs.httpsGet);
   tryFreeze(netMod, 'connect', frozenRefs.netConnect);
   tryFreeze(tlsMod, 'connect', frozenRefs.tlsConnect);
   tryFreeze(cpMod, 'spawn', frozenRefs.spawn);
+  tryFreeze(cpMod, 'spawnSync', frozenRefs.spawnSync);
   tryFreeze(cpMod, 'execFile', frozenRefs.execFile);
+  tryFreeze(cpMod, 'execFileSync', frozenRefs.execFileSync);
   tryFreeze(cpMod, 'exec', frozenRefs.exec);
+  tryFreeze(cpMod, 'execSync', frozenRefs.execSync);
+  tryFreeze(cpMod, 'fork', frozenRefs.fork);
 }
 
 function tryFreeze(obj: object, prop: string, value: unknown): void {
@@ -98,29 +120,29 @@ export function detectTamper(): string[] {
 
   const tampered: string[] = [];
 
-  if (frozenRefs.fetch && globalThis.fetch !== frozenRefs.fetch) {
-    tampered.push('fetch');
-  }
-  if (httpMod.request !== frozenRefs.httpRequest) {
-    tampered.push('http.request');
-  }
-  if (httpsMod.request !== frozenRefs.httpsRequest) {
-    tampered.push('https.request');
-  }
-  if (netMod.connect !== frozenRefs.netConnect) {
-    tampered.push('net.connect');
-  }
-  if (tlsMod.connect !== frozenRefs.tlsConnect) {
-    tampered.push('tls.connect');
-  }
-  if (cpMod.spawn !== frozenRefs.spawn) {
-    tampered.push('child_process.spawn');
-  }
-  if (cpMod.execFile !== frozenRefs.execFile) {
-    tampered.push('child_process.execFile');
-  }
-  if (cpMod.exec !== frozenRefs.exec) {
-    tampered.push('child_process.exec');
+  // Check every patched function. If you're wondering why we check this many,
+  // it's because we learned the hard way that attackers read source code.
+  const checks: [unknown, unknown, string][] = [
+    [globalThis.fetch, frozenRefs.fetch, 'fetch'],
+    [httpMod.request, frozenRefs.httpRequest, 'http.request'],
+    [httpsMod.request, frozenRefs.httpsRequest, 'https.request'],
+    [httpMod.get, frozenRefs.httpGet, 'http.get'],
+    [httpsMod.get, frozenRefs.httpsGet, 'https.get'],
+    [netMod.connect, frozenRefs.netConnect, 'net.connect'],
+    [tlsMod.connect, frozenRefs.tlsConnect, 'tls.connect'],
+    [cpMod.spawn, frozenRefs.spawn, 'child_process.spawn'],
+    [cpMod.spawnSync, frozenRefs.spawnSync, 'child_process.spawnSync'],
+    [cpMod.execFile, frozenRefs.execFile, 'child_process.execFile'],
+    [cpMod.execFileSync, frozenRefs.execFileSync, 'child_process.execFileSync'],
+    [cpMod.exec, frozenRefs.exec, 'child_process.exec'],
+    [cpMod.execSync, frozenRefs.execSync, 'child_process.execSync'],
+    [cpMod.fork, frozenRefs.fork, 'child_process.fork'],
+  ];
+
+  for (const [current, expected, name] of checks) {
+    if (expected && current !== expected) {
+      tampered.push(name);
+    }
   }
 
   return tampered;
@@ -132,14 +154,18 @@ export function detectTamper(): string[] {
  *   2. Emits an audit event
  *   3. Attempts to re-freeze the interceptors
  *
+ * Default interval: 1000ms. Because 5 seconds is an eternity when someone
+ * is trying to exfiltrate your AWS credentials through a forked Node process
+ * they snuck past the guards.
+ *
  * @param state - Session state manager
  * @param sessionId - Current session ID
- * @param intervalMs - Check interval (default: 5000ms)
+ * @param intervalMs - Check interval (default: 1000ms)
  */
 export function startTamperDetection(
   state: StateManager,
   sessionId: string,
-  intervalMs: number = 5000,
+  intervalMs: number = 1000,
 ): void {
   if (tamperTimer) return; // Already running
 
@@ -190,11 +216,17 @@ export function resetFreeze(): void {
   if (frozenRefs) {
     tryUnfreeze(httpMod, 'request');
     tryUnfreeze(httpsMod, 'request');
+    tryUnfreeze(httpMod, 'get');
+    tryUnfreeze(httpsMod, 'get');
     tryUnfreeze(netMod, 'connect');
     tryUnfreeze(tlsMod, 'connect');
     tryUnfreeze(cpMod, 'spawn');
+    tryUnfreeze(cpMod, 'spawnSync');
     tryUnfreeze(cpMod, 'execFile');
+    tryUnfreeze(cpMod, 'execFileSync');
     tryUnfreeze(cpMod, 'exec');
+    tryUnfreeze(cpMod, 'execSync');
+    tryUnfreeze(cpMod, 'fork');
   }
   frozenRefs = null;
 }

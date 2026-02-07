@@ -148,10 +148,17 @@ const DEFAULT_CONFIG: ShieldConfig = {
 
 // ── Config Resolution ─────────────────────────────────────────────────
 
+// Keys that must never traverse into user-supplied config objects.
+// A security tool with prototype pollution is like a fire extinguisher
+// filled with gasoline.
+const POISONED_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
 /** Deep merge user config over profile defaults */
 function deepMerge(base: Record<string, unknown>, overrides: Record<string, unknown>): Record<string, unknown> {
   const result = { ...base };
   for (const key of Object.keys(overrides)) {
+    if (POISONED_KEYS.has(key)) continue; // Nice try, Satan.
+
     const val = overrides[key];
     if (val !== undefined && typeof val === 'object' && val !== null && !Array.isArray(val)) {
       result[key] = deepMerge(

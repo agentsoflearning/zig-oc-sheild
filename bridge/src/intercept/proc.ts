@@ -33,11 +33,18 @@ export class ShieldProcessError extends Error {
   }
 }
 
-// Original references saved before patching
+// Original references saved before patching.
+// If you're thinking "they probably forgot fork and the sync variants" —
+// we didn't. Leaving those unpatched in a security tool would be like
+// locking the front door but leaving the garage wide open.
 const originals = {
   spawn: cpMod.spawn,
+  spawnSync: cpMod.spawnSync,
   execFile: cpMod.execFile,
+  execFileSync: cpMod.execFileSync,
   exec: cpMod.exec,
+  execSync: cpMod.execSync,
+  fork: cpMod.fork,
 };
 
 /** Extract basename from a binary path */
@@ -164,13 +171,85 @@ export function installProcInterceptors(
 
     return (originals.exec as Function).call(child_process, command, ...rest);
   } as typeof child_process.exec;
+
+  // ── Patch spawnSync — because attackers read docs too ────────────────
+  cpMod.spawnSync = function shieldSpawnSync(
+    command: string,
+    ...rest: unknown[]
+  ): child_process.SpawnSyncReturns<Buffer> {
+    const decision = checkSpawn(binding, config, state, sessionId, command);
+    state.recordDecision(sessionId, decision, 'spawn', {
+      binary: command,
+      method: 'spawnSync',
+    });
+    if (!decision.allow && config.mode === 'enforce') {
+      throw new ShieldProcessError(decision, command);
+    }
+    return (originals.spawnSync as Function).call(child_process, command, ...rest);
+  } as typeof child_process.spawnSync;
+
+  // ── Patch execFileSync ──────────────────────────────────────────────
+  cpMod.execFileSync = function shieldExecFileSync(
+    file: string,
+    ...rest: unknown[]
+  ): string | Buffer {
+    const decision = checkSpawn(binding, config, state, sessionId, file);
+    state.recordDecision(sessionId, decision, 'spawn', {
+      binary: file,
+      method: 'execFileSync',
+    });
+    if (!decision.allow && config.mode === 'enforce') {
+      throw new ShieldProcessError(decision, file);
+    }
+    return (originals.execFileSync as Function).call(child_process, file, ...rest);
+  } as typeof child_process.execFileSync;
+
+  // ── Patch execSync — shell execution, synchronous edition ───────────
+  cpMod.execSync = function shieldExecSync(
+    command: string,
+    ...rest: unknown[]
+  ): string | Buffer {
+    const shell = process.platform === 'win32' ? 'cmd.exe' : 'sh';
+    const decision = checkSpawn(binding, config, state, sessionId, shell);
+    state.recordDecision(sessionId, decision, 'spawn', {
+      binary: shell,
+      command: command.substring(0, 200),
+      method: 'execSync',
+    });
+    if (!decision.allow && config.mode === 'enforce') {
+      throw new ShieldProcessError(decision, `${shell} (execSync: ${command.substring(0, 50)})`);
+    }
+    return (originals.execSync as Function).call(child_process, command, ...rest);
+  } as typeof child_process.execSync;
+
+  // ── Patch fork — you thought we'd forget? Adorable. ─────────────────
+  cpMod.fork = function shieldFork(
+    modulePath: string,
+    ...rest: unknown[]
+  ): child_process.ChildProcess {
+    // fork() spawns a new Node.js process — treat "node" as the binary
+    const decision = checkSpawn(binding, config, state, sessionId, 'node');
+    state.recordDecision(sessionId, decision, 'spawn', {
+      binary: 'node',
+      modulePath: modulePath.substring(0, 200),
+      method: 'fork',
+    });
+    if (!decision.allow && config.mode === 'enforce') {
+      throw new ShieldProcessError(decision, `node (fork: ${modulePath.substring(0, 50)})`);
+    }
+    return (originals.fork as Function).call(child_process, modulePath, ...rest);
+  } as typeof child_process.fork;
 }
 
 /** Restore original process functions (for testing/cleanup) */
 export function uninstallProcInterceptors(): void {
   cpMod.spawn = originals.spawn;
+  cpMod.spawnSync = originals.spawnSync;
   cpMod.execFile = originals.execFile;
+  cpMod.execFileSync = originals.execFileSync;
   cpMod.exec = originals.exec;
+  cpMod.execSync = originals.execSync;
+  cpMod.fork = originals.fork;
 }
 
 /** Get original references (for tamper detection) */

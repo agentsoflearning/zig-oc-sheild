@@ -53,6 +53,57 @@ const originals = {
   tlsConnect: tlsMod.connect,
 };
 
+/**
+ * Normalize IP addresses that use non-standard encodings.
+ * Node.js (via libuv/getaddrinfo) happily resolves hex, octal, and decimal
+ * IP forms that our Zig classifier wouldn't recognize as IPs.
+ *
+ * Without this, an attacker could bypass RFC1918/localhost checks with:
+ *   0x7f000001     → 127.0.0.1  (hex integer)
+ *   0177.0.0.1     → 127.0.0.1  (octal octets)
+ *   2130706433     → 127.0.0.1  (decimal integer)
+ *   0x0a000001     → 10.0.0.1   (hex integer — RFC1918 bypass!)
+ *   017700000001   → 127.0.0.1  (full octal)
+ *
+ * Trying to sneak past a security tool with octal IPs is the networking
+ * equivalent of wearing a fake mustache to your own surprise party.
+ */
+function normalizeHost(host: string): string {
+  const trimmed = host.trim();
+
+  // Full hex integer: 0x7f000001
+  if (/^0x[0-9a-fA-F]+$/.test(trimmed)) {
+    const num = parseInt(trimmed, 16);
+    if (num >= 0 && num <= 0xFFFFFFFF) {
+      return `${(num >> 24) & 0xFF}.${(num >> 16) & 0xFF}.${(num >> 8) & 0xFF}.${num & 0xFF}`;
+    }
+  }
+
+  // Full decimal integer: 2130706433 (but not a normal hostname)
+  if (/^\d{4,10}$/.test(trimmed)) {
+    const num = parseInt(trimmed, 10);
+    if (num >= 0 && num <= 0xFFFFFFFF) {
+      return `${(num >> 24) & 0xFF}.${(num >> 16) & 0xFF}.${(num >> 8) & 0xFF}.${num & 0xFF}`;
+    }
+  }
+
+  // Dotted octal/mixed: 0177.0.0.01 or 010.0.0.01
+  if (/^[0-9.]+$/.test(trimmed)) {
+    const parts = trimmed.split('.');
+    if (parts.length === 4) {
+      const hasOctal = parts.some(p => p.length > 1 && p.startsWith('0') && !/^0$/.test(p));
+      if (hasOctal) {
+        const octets = parts.map(p => parseInt(p, p.startsWith('0') && p.length > 1 ? 8 : 10));
+        if (octets.every(o => o >= 0 && o <= 255)) {
+          return octets.join('.');
+        }
+      }
+    }
+  }
+
+  return trimmed;
+}
+
 /** Check if connection should be allowed */
 function checkConnection(
   binding: NativeBinding,
@@ -66,11 +117,14 @@ function checkConnection(
   // Check de-escalation first
   state.checkDeescalation(sessionId);
 
+  // Normalize sneaky IP encodings before the Zig classifier sees them
+  const normalizedHost = normalizeHost(host);
+
   const taint = state.getTaintState(sessionId);
   const policyFlags = buildPolicyFlags(config.network);
 
-  // IP-level checks via Zig engine
-  const ipDecision = binding.decideNetConnect(host, port, taint, policyFlags);
+  // IP-level checks via Zig engine (using normalized host)
+  const ipDecision = binding.decideNetConnect(normalizedHost, port, taint, policyFlags);
   if (!ipDecision.allow) return ipDecision;
 
   // Port allowlist (TS-side check for both N-API and WASM paths)
@@ -83,8 +137,8 @@ function checkConnection(
     };
   }
 
-  // Domain allowlist (TS-side check)
-  if (!isHostAllowed(host, config.network.allowedHosts)) {
+  // Domain allowlist (TS-side check — uses normalized host)
+  if (!isHostAllowed(normalizedHost, config.network.allowedHosts)) {
     return {
       allow: false,
       reasonCode: ReasonCode.NET_DOMAIN_NOT_ALLOWED,
