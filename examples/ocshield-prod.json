@@ -3,7 +3,9 @@
   "mode": "enforce",
   "network": {
     "allowedHosts": [],
-    "allowedPorts": [443],
+    "allowedPorts": [
+      443
+    ],
     "blockRFC1918": true,
     "blockLocalhost": true,
     "blockLinkLocal": true,
@@ -28,5 +30,16 @@
     "enabled": true,
     "base64Threshold": 4.5,
     "hexThreshold": 3.5
+  },
+  "filesystem": {
+    "blockSensitivePaths": true,
+    "blockWrites": true,
+    "allowedWritePaths": [],
+    "blockPathTraversal": true
+  },
+  "dns": {
+    "blockPrivateResolution": true,
+    "allowedDomains": [],
+    "blockAllDns": false
   }
 }

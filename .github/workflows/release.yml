@@ -1,0 +1,238 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-zig:
+    name: Build Zig (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-linux
+            zig_target: x86_64-linux-musl
+            artifact: ocshield-x86_64-linux
+          - target: aarch64-linux
+            zig_target: aarch64-linux-musl
+            artifact: ocshield-aarch64-linux
+          - target: x86_64-macos
+            zig_target: x86_64-macos
+            artifact: ocshield-x86_64-macos
+          - target: aarch64-macos
+            zig_target: aarch64-macos
+            artifact: ocshield-aarch64-macos
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Zig 0.13.0
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.13.0
+
+      - name: Build CLI (ReleaseSafe)
+        run: zig build -Dtarget=${{ matrix.zig_target }} -Doptimize=ReleaseSafe
+
+      - name: Package binary
+        run: |
+          cp zig-out/bin/ocshield ${{ matrix.artifact }}
+          chmod +x ${{ matrix.artifact }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
+
+  build-gateway-package:
+    name: Build Gateway Package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Zig 0.13.0
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.13.0
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build WASM module
+        run: zig build wasm
+
+      - name: Install dependencies and build bridge
+        working-directory: bridge
+        run: |
+          npm ci
+          npm run build
+
+      - name: Assemble gateway package
+        run: |
+          PKG="ocshield"
+
+          mkdir -p ${PKG}
+
+          # ── Compiled bridge (what OpenClaw loads) ─────────────────────
+          cp -r bridge/dist        ${PKG}/dist
+          cp -r bridge/src         ${PKG}/src
+          cp    bridge/tsconfig.json ${PKG}/
+
+          # ── package.json wired for OpenClaw plugin loading ────────────
+          cp    bridge/package.json  ${PKG}/package.json
+
+          # ── Production dependencies only ──────────────────────────────
+          cd ${PKG} && npm install --omit=dev && cd ..
+
+          # ── WASM engine (fallback binding) ────────────────────────────
+          cp    zig-out/bin/ocshield.wasm ${PKG}/ocshield.wasm
+
+          # ── Default config (auto-discovered by the plugin) ────────────
+          cp    ocshield.json ${PKG}/ocshield.json
+
+          # ── Profile configs the user can switch to ────────────────────
+          cp -r examples ${PKG}/profiles
+
+          # ── Documentation ─────────────────────────────────────────────
+          cp    LICENSE  ${PKG}/
+          cp    README.md ${PKG}/
+          cp    NOTICE   ${PKG}/
+
+          # ── Tar it up ─────────────────────────────────────────────────
+          tar czf ocshield-gateway-${{ github.ref_name }}.tar.gz ${PKG}/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ocshield-gateway
+          path: ocshield-gateway-${{ github.ref_name }}.tar.gz
+
+  test:
+    name: Test before release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Zig 0.13.0
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.13.0
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Run Zig tests
+        run: zig build test
+
+      - name: Install bridge dependencies
+        working-directory: bridge
+        run: npm ci
+
+      - name: Type check
+        working-directory: bridge
+        run: npx tsc --noEmit
+
+      - name: Run jiti integration tests
+        working-directory: bridge
+        run: npm test
+
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build-zig, build-gateway-package, test]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p final-assets
+          cp release-assets/ocshield-x86_64-linux/ocshield-x86_64-linux   final-assets/
+          cp release-assets/ocshield-aarch64-linux/ocshield-aarch64-linux  final-assets/
+          cp release-assets/ocshield-x86_64-macos/ocshield-x86_64-macos   final-assets/
+          cp release-assets/ocshield-aarch64-macos/ocshield-aarch64-macos  final-assets/
+          cp release-assets/ocshield-gateway/ocshield-gateway-${{ github.ref_name }}.tar.gz final-assets/
+          cd final-assets
+          sha256sum * > SHA256SUMS.txt
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: final-assets/*
+          body: |
+            ## OpenClaw Gateway Package
+
+            Download `ocshield-gateway-${{ github.ref_name }}.tar.gz` and deploy:
+
+            ```bash
+            # Extract into your OpenClaw plugins directory
+            cd ~/.openclaw/plugins      # or wherever your gateway loads plugins
+            tar xzf ocshield-gateway-${{ github.ref_name }}.tar.gz
+
+            # That's it. The directory is ready to load:
+            #
+            #   ocshield/
+            #   ├── package.json          ← OpenClaw plugin manifest
+            #   ├── ocshield.json         ← Default policy (corp-dev profile, edit to taste)
+            #   ├── dist/                 ← Compiled plugin (loaded by jiti)
+            #   ├── src/                  ← TypeScript source (jiti fallback)
+            #   ├── ocshield.wasm         ← Zig security engine (WASM)
+            #   ├── node_modules/         ← Dependencies (pre-installed)
+            #   ├── profiles/             ← Alternative configs: home-lab, prod, research
+            #   ├── LICENSE
+            #   ├── NOTICE
+            #   └── README.md
+            ```
+
+            Then point OpenClaw to it:
+
+            ```jsonc
+            // ~/.openclaw/config.json
+            {
+              "plugins": {
+                "load": {
+                  "paths": ["~/.openclaw/plugins/ocshield"]
+                }
+              }
+            }
+            ```
+
+            ### Customize Policy
+
+            Edit `ocshield/ocshield.json`, or copy a profile:
+
+            ```bash
+            # Switch to lockdown mode
+            cp ocshield/profiles/ocshield-prod.json ocshield/ocshield.json
+
+            # Or permissive mode for local dev
+            cp ocshield/profiles/ocshield-home-lab.json ocshield/ocshield.json
+            ```
+
+            ### Standalone CLI Binaries
+
+            | Asset | Platform |
+            |-------|----------|
+            | `ocshield-x86_64-linux` | Linux x86_64 |
+            | `ocshield-aarch64-linux` | Linux ARM64 |
+            | `ocshield-x86_64-macos` | macOS Intel |
+            | `ocshield-aarch64-macos` | macOS Apple Silicon |
+
+            ```bash
+            chmod +x ocshield-x86_64-linux
+            ./ocshield-x86_64-linux scan "text containing secrets"
+            ```

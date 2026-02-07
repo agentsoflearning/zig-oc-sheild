@@ -10,6 +10,8 @@
 import { loadBindingSync, NativeBinding } from './native';
 import { installNetInterceptors, uninstallNetInterceptors } from './intercept/net';
 import { installProcInterceptors, uninstallProcInterceptors } from './intercept/proc';
+import { installFsInterceptors, uninstallFsInterceptors } from './intercept/fs';
+import { installDnsInterceptors, uninstallDnsInterceptors } from './intercept/dns';
 import { freezeInterceptors, startTamperDetection, stopTamperDetection, resetFreeze } from './intercept/freeze';
 import { StateManager } from './intercept/state';
 import { ShieldConfig, Profile, TaintState } from './types';
@@ -35,6 +37,17 @@ const PROFILE_DEFAULTS: Record<Profile, Partial<ShieldConfig>> = {
       denyShells: false,
       maxExecPerMin: 100,
     },
+    filesystem: {
+      blockSensitivePaths: true,
+      blockWrites: false,
+      allowedWritePaths: ['*'],
+      blockPathTraversal: true,
+    },
+    dns: {
+      blockPrivateResolution: false,
+      allowedDomains: ['*'],
+      blockAllDns: false,
+    },
     taint: {
       autoEscalate: false,
       quarantineThreshold: 999,
@@ -57,6 +70,17 @@ const PROFILE_DEFAULTS: Record<Profile, Partial<ShieldConfig>> = {
       allowedBinaries: ['git', 'node', 'npx', 'python'],
       denyShells: true,
       maxExecPerMin: 30,
+    },
+    filesystem: {
+      blockSensitivePaths: true,
+      blockWrites: true,
+      allowedWritePaths: ['/tmp/*', '/var/tmp/*'],
+      blockPathTraversal: true,
+    },
+    dns: {
+      blockPrivateResolution: true,
+      allowedDomains: ['*.internal.corp'],
+      blockAllDns: false,
     },
     taint: {
       autoEscalate: true,
@@ -81,6 +105,17 @@ const PROFILE_DEFAULTS: Record<Profile, Partial<ShieldConfig>> = {
       denyShells: true,
       maxExecPerMin: 10,
     },
+    filesystem: {
+      blockSensitivePaths: true,
+      blockWrites: true,
+      allowedWritePaths: [],
+      blockPathTraversal: true,
+    },
+    dns: {
+      blockPrivateResolution: true,
+      allowedDomains: [],
+      blockAllDns: false,
+    },
     taint: {
       autoEscalate: true,
       quarantineThreshold: 5,
@@ -103,6 +138,17 @@ const PROFILE_DEFAULTS: Record<Profile, Partial<ShieldConfig>> = {
       allowedBinaries: ['git', 'node', 'npx', 'python', 'pip'],
       denyShells: true,
       maxExecPerMin: 30,
+    },
+    filesystem: {
+      blockSensitivePaths: true,
+      blockWrites: true,
+      allowedWritePaths: ['/tmp/*'],
+      blockPathTraversal: true,
+    },
+    dns: {
+      blockPrivateResolution: true,
+      allowedDomains: ['*'],
+      blockAllDns: false,
     },
     taint: {
       autoEscalate: true,
@@ -135,6 +181,17 @@ const DEFAULT_CONFIG: ShieldConfig = {
     autoEscalate: true,
     quarantineThreshold: 5,
     coolDownSeconds: 300,
+  },
+  filesystem: {
+    blockSensitivePaths: true,
+    blockWrites: true,
+    allowedWritePaths: [],
+    blockPathTraversal: true,
+  },
+  dns: {
+    blockPrivateResolution: true,
+    allowedDomains: [],
+    blockAllDns: false,
   },
   redaction: {
     strategy: 'mask',
@@ -236,6 +293,8 @@ export function init(pluginConfig: Record<string, unknown> = {}): void {
   if (currentConfig.layers?.preventiveEnforcement !== false) {
     installNetInterceptors(binding, currentConfig, stateManager, sessionId);
     installProcInterceptors(binding, currentConfig, stateManager, sessionId);
+    installFsInterceptors(currentConfig, stateManager, sessionId);
+    installDnsInterceptors(currentConfig, stateManager, sessionId);
     freezeInterceptors();
     startTamperDetection(stateManager, sessionId);
   }
@@ -256,6 +315,8 @@ export function shutdown(): void {
   resetFreeze();
   uninstallNetInterceptors();
   uninstallProcInterceptors();
+  uninstallFsInterceptors();
+  uninstallDnsInterceptors();
   initialized = false;
   binding = null;
   stateManager = null;
@@ -313,6 +374,8 @@ export function shieldSetProfile(profile: Profile, userOverrides: Record<string,
   resetFreeze();
   uninstallNetInterceptors();
   uninstallProcInterceptors();
+  uninstallFsInterceptors();
+  uninstallDnsInterceptors();
 
   // Resolve new config
   currentConfig = resolveConfig({ ...userOverrides, profile });
@@ -323,6 +386,8 @@ export function shieldSetProfile(profile: Profile, userOverrides: Record<string,
   // Re-install interceptors
   installNetInterceptors(binding, currentConfig, stateManager, sessionId);
   installProcInterceptors(binding, currentConfig, stateManager, sessionId);
+  installFsInterceptors(currentConfig, stateManager, sessionId);
+  installDnsInterceptors(currentConfig, stateManager, sessionId);
   freezeInterceptors();
   startTamperDetection(stateManager, sessionId);
 
@@ -390,6 +455,8 @@ export type { NativeBinding } from './native';
 export { loadBinding, loadBindingSync, buildPolicyFlags } from './native';
 export { installNetInterceptors, uninstallNetInterceptors, ShieldNetworkError } from './intercept/net';
 export { installProcInterceptors, uninstallProcInterceptors, ShieldProcessError } from './intercept/proc';
+export { installFsInterceptors, uninstallFsInterceptors, ShieldFilesystemError } from './intercept/fs';
+export { installDnsInterceptors, uninstallDnsInterceptors, ShieldDnsError } from './intercept/dns';
 export { freezeInterceptors, startTamperDetection, stopTamperDetection, detectTamper } from './intercept/freeze';
 export { loadConfigFromFile, discoverConfigFile, validateConfig, loadAndValidateConfig } from './policy';
 export type { ValidationResult, ValidationError } from './policy';

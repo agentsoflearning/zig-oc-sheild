@@ -10,6 +10,8 @@ import * as https from 'https';
 import * as net from 'net';
 import * as tls from 'tls';
 import * as child_process from 'child_process';
+import * as fs from 'fs';
+import * as dns from 'dns';
 import { StateManager } from './state';
 import { ReasonCode } from '../types';
 
@@ -22,6 +24,8 @@ const httpsMod: typeof https = require('https');
 const netMod: typeof net = require('net');
 const tlsMod: typeof tls = require('tls');
 const cpMod: typeof child_process = require('child_process');
+const fsMod: typeof fs = require('fs');
+const dnsMod: typeof dns = require('dns');
 
 /** References to the patched (shield) functions */
 interface PatchedRefs {
@@ -39,6 +43,18 @@ interface PatchedRefs {
   exec: typeof child_process.exec;
   execSync: typeof child_process.execSync;
   fork: typeof child_process.fork;
+  fsReadFile: typeof fs.readFile;
+  fsReadFileSync: typeof fs.readFileSync;
+  fsWriteFile: typeof fs.writeFile;
+  fsWriteFileSync: typeof fs.writeFileSync;
+  fsOpen: typeof fs.open;
+  fsOpenSync: typeof fs.openSync;
+  fsCreateReadStream: typeof fs.createReadStream;
+  fsCreateWriteStream: typeof fs.createWriteStream;
+  dnsLookup: typeof dns.lookup;
+  dnsResolve: typeof dns.resolve;
+  dnsResolve4: typeof dns.resolve4;
+  dnsResolve6: typeof dns.resolve6;
 }
 
 let frozenRefs: PatchedRefs | null = null;
@@ -69,15 +85,29 @@ export function freezeInterceptors(): void {
     exec: cpMod.exec,
     execSync: cpMod.execSync,
     fork: cpMod.fork,
+    fsReadFile: fsMod.readFile,
+    fsReadFileSync: fsMod.readFileSync,
+    fsWriteFile: fsMod.writeFile,
+    fsWriteFileSync: fsMod.writeFileSync,
+    fsOpen: fsMod.open,
+    fsOpenSync: fsMod.openSync,
+    fsCreateReadStream: fsMod.createReadStream,
+    fsCreateWriteStream: fsMod.createWriteStream,
+    dnsLookup: dnsMod.lookup,
+    dnsResolve: dnsMod.resolve,
+    dnsResolve4: dnsMod.resolve4,
+    dnsResolve6: dnsMod.resolve6,
   };
 
   // Best-effort freeze: make properties non-writable
+  // Network
   tryFreeze(httpMod, 'request', frozenRefs.httpRequest);
   tryFreeze(httpsMod, 'request', frozenRefs.httpsRequest);
   tryFreeze(httpMod, 'get', frozenRefs.httpGet);
   tryFreeze(httpsMod, 'get', frozenRefs.httpsGet);
   tryFreeze(netMod, 'connect', frozenRefs.netConnect);
   tryFreeze(tlsMod, 'connect', frozenRefs.tlsConnect);
+  // Process
   tryFreeze(cpMod, 'spawn', frozenRefs.spawn);
   tryFreeze(cpMod, 'spawnSync', frozenRefs.spawnSync);
   tryFreeze(cpMod, 'execFile', frozenRefs.execFile);
@@ -85,6 +115,20 @@ export function freezeInterceptors(): void {
   tryFreeze(cpMod, 'exec', frozenRefs.exec);
   tryFreeze(cpMod, 'execSync', frozenRefs.execSync);
   tryFreeze(cpMod, 'fork', frozenRefs.fork);
+  // Filesystem
+  tryFreeze(fsMod, 'readFile', frozenRefs.fsReadFile);
+  tryFreeze(fsMod, 'readFileSync', frozenRefs.fsReadFileSync);
+  tryFreeze(fsMod, 'writeFile', frozenRefs.fsWriteFile);
+  tryFreeze(fsMod, 'writeFileSync', frozenRefs.fsWriteFileSync);
+  tryFreeze(fsMod, 'open', frozenRefs.fsOpen);
+  tryFreeze(fsMod, 'openSync', frozenRefs.fsOpenSync);
+  tryFreeze(fsMod, 'createReadStream', frozenRefs.fsCreateReadStream);
+  tryFreeze(fsMod, 'createWriteStream', frozenRefs.fsCreateWriteStream);
+  // DNS
+  tryFreeze(dnsMod, 'lookup', frozenRefs.dnsLookup);
+  tryFreeze(dnsMod, 'resolve', frozenRefs.dnsResolve);
+  tryFreeze(dnsMod, 'resolve4', frozenRefs.dnsResolve4);
+  tryFreeze(dnsMod, 'resolve6', frozenRefs.dnsResolve6);
 }
 
 function tryFreeze(obj: object, prop: string, value: unknown): void {
@@ -122,6 +166,8 @@ export function detectTamper(): string[] {
 
   // Check every patched function. If you're wondering why we check this many,
   // it's because we learned the hard way that attackers read source code.
+  // We now guard 26 entry points. Miss one, and the attacker gets a free pass —
+  // like having a 25-digit PIN but leaving the last digit on a sticky note.
   const checks: [unknown, unknown, string][] = [
     [globalThis.fetch, frozenRefs.fetch, 'fetch'],
     [httpMod.request, frozenRefs.httpRequest, 'http.request'],
@@ -137,6 +183,18 @@ export function detectTamper(): string[] {
     [cpMod.exec, frozenRefs.exec, 'child_process.exec'],
     [cpMod.execSync, frozenRefs.execSync, 'child_process.execSync'],
     [cpMod.fork, frozenRefs.fork, 'child_process.fork'],
+    [fsMod.readFile, frozenRefs.fsReadFile, 'fs.readFile'],
+    [fsMod.readFileSync, frozenRefs.fsReadFileSync, 'fs.readFileSync'],
+    [fsMod.writeFile, frozenRefs.fsWriteFile, 'fs.writeFile'],
+    [fsMod.writeFileSync, frozenRefs.fsWriteFileSync, 'fs.writeFileSync'],
+    [fsMod.open, frozenRefs.fsOpen, 'fs.open'],
+    [fsMod.openSync, frozenRefs.fsOpenSync, 'fs.openSync'],
+    [fsMod.createReadStream, frozenRefs.fsCreateReadStream, 'fs.createReadStream'],
+    [fsMod.createWriteStream, frozenRefs.fsCreateWriteStream, 'fs.createWriteStream'],
+    [dnsMod.lookup, frozenRefs.dnsLookup, 'dns.lookup'],
+    [dnsMod.resolve, frozenRefs.dnsResolve, 'dns.resolve'],
+    [dnsMod.resolve4, frozenRefs.dnsResolve4, 'dns.resolve4'],
+    [dnsMod.resolve6, frozenRefs.dnsResolve6, 'dns.resolve6'],
   ];
 
   for (const [current, expected, name] of checks) {
@@ -214,12 +272,14 @@ export function stopTamperDetection(): void {
 export function resetFreeze(): void {
   stopTamperDetection();
   if (frozenRefs) {
+    // Network
     tryUnfreeze(httpMod, 'request');
     tryUnfreeze(httpsMod, 'request');
     tryUnfreeze(httpMod, 'get');
     tryUnfreeze(httpsMod, 'get');
     tryUnfreeze(netMod, 'connect');
     tryUnfreeze(tlsMod, 'connect');
+    // Process
     tryUnfreeze(cpMod, 'spawn');
     tryUnfreeze(cpMod, 'spawnSync');
     tryUnfreeze(cpMod, 'execFile');
@@ -227,6 +287,20 @@ export function resetFreeze(): void {
     tryUnfreeze(cpMod, 'exec');
     tryUnfreeze(cpMod, 'execSync');
     tryUnfreeze(cpMod, 'fork');
+    // Filesystem
+    tryUnfreeze(fsMod, 'readFile');
+    tryUnfreeze(fsMod, 'readFileSync');
+    tryUnfreeze(fsMod, 'writeFile');
+    tryUnfreeze(fsMod, 'writeFileSync');
+    tryUnfreeze(fsMod, 'open');
+    tryUnfreeze(fsMod, 'openSync');
+    tryUnfreeze(fsMod, 'createReadStream');
+    tryUnfreeze(fsMod, 'createWriteStream');
+    // DNS
+    tryUnfreeze(dnsMod, 'lookup');
+    tryUnfreeze(dnsMod, 'resolve');
+    tryUnfreeze(dnsMod, 'resolve4');
+    tryUnfreeze(dnsMod, 'resolve6');
   }
   frozenRefs = null;
 }
