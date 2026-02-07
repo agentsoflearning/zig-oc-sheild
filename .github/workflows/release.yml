@@ -1,0 +1,203 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-zig:
+    name: Build Zig (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-linux
+            zig_target: x86_64-linux-musl
+            artifact: ocshield-x86_64-linux
+          - target: aarch64-linux
+            zig_target: aarch64-linux-musl
+            artifact: ocshield-aarch64-linux
+          - target: x86_64-macos
+            zig_target: x86_64-macos
+            artifact: ocshield-x86_64-macos
+          - target: aarch64-macos
+            zig_target: aarch64-macos
+            artifact: ocshield-aarch64-macos
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Zig 0.13.0
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.13.0
+
+      - name: Build CLI (ReleaseSafe)
+        run: zig build -Dtarget=${{ matrix.zig_target }} -Doptimize=ReleaseSafe
+
+      - name: Package binary
+        run: |
+          cp zig-out/bin/ocshield ${{ matrix.artifact }}
+          chmod +x ${{ matrix.artifact }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
+
+  build-wasm:
+    name: Build WASM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Zig 0.13.0
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.13.0
+
+      - name: Build WASM module
+        run: zig build wasm
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ocshield.wasm
+          path: zig-out/bin/ocshield.wasm
+
+  build-bridge:
+    name: Build Bridge Package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Zig 0.13.0
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.13.0
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build WASM (bundled in package)
+        run: zig build wasm
+
+      - name: Install and build bridge
+        working-directory: bridge
+        run: |
+          npm ci
+          npm run build
+
+      - name: Package for deployment
+        run: |
+          mkdir -p ocshield-bridge
+          cp -r bridge/dist ocshield-bridge/
+          cp -r bridge/src ocshield-bridge/
+          cp bridge/package.json ocshield-bridge/
+          cp bridge/package-lock.json ocshield-bridge/
+          cp bridge/tsconfig.json ocshield-bridge/
+          cp zig-out/bin/ocshield.wasm ocshield-bridge/
+          cp -r examples ocshield-bridge/
+          cp LICENSE ocshield-bridge/
+          cp README.md ocshield-bridge/
+          tar czf ocshield-bridge-${{ github.ref_name }}.tar.gz ocshield-bridge/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ocshield-bridge
+          path: ocshield-bridge-${{ github.ref_name }}.tar.gz
+
+  test:
+    name: Test before release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Zig 0.13.0
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.13.0
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Run Zig tests
+        run: zig build test
+
+      - name: Install bridge dependencies
+        working-directory: bridge
+        run: npm ci
+
+      - name: Type check
+        working-directory: bridge
+        run: npx tsc --noEmit
+
+      - name: Run jiti integration tests
+        working-directory: bridge
+        run: npm test
+
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build-zig, build-wasm, build-bridge, test]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p final-assets
+          cp release-assets/ocshield-x86_64-linux/ocshield-x86_64-linux final-assets/
+          cp release-assets/ocshield-aarch64-linux/ocshield-aarch64-linux final-assets/
+          cp release-assets/ocshield-x86_64-macos/ocshield-x86_64-macos final-assets/
+          cp release-assets/ocshield-aarch64-macos/ocshield-aarch64-macos final-assets/
+          cp release-assets/ocshield.wasm/ocshield.wasm final-assets/
+          cp release-assets/ocshield-bridge/ocshield-bridge-${{ github.ref_name }}.tar.gz final-assets/
+          cd final-assets
+          sha256sum * > SHA256SUMS.txt
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: final-assets/*
+          body: |
+            ## Downloads
+
+            | Asset | Description |
+            |-------|-------------|
+            | `ocshield-x86_64-linux` | CLI binary — Linux x86_64 |
+            | `ocshield-aarch64-linux` | CLI binary — Linux ARM64 |
+            | `ocshield-x86_64-macos` | CLI binary — macOS Intel |
+            | `ocshield-aarch64-macos` | CLI binary — macOS Apple Silicon |
+            | `ocshield.wasm` | WASM module for browser/non-native targets |
+            | `ocshield-bridge-${{ github.ref_name }}.tar.gz` | OpenClaw gateway deployment package (TS bridge + WASM + configs) |
+
+            ### Deploy to OpenClaw Gateway
+
+            ```bash
+            tar xzf ocshield-bridge-${{ github.ref_name }}.tar.gz
+            cd ocshield-bridge
+            npm install --production
+            # Point your OpenClaw gateway config to this directory
+            ```
+
+            ### Standalone CLI
+
+            ```bash
+            chmod +x ocshield-x86_64-linux
+            ./ocshield-x86_64-linux scan "text to scan"
+            ```
